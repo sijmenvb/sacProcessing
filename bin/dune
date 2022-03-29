@@ -1,0 +1,4 @@
+(executable
+ (public_name sacProcessing)
+ (name main)
+ (libraries angstrom))

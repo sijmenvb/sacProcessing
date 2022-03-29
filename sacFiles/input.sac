@@ -1,0 +1,23 @@
+use StdIO : all;
+use Array : all;
+
+int func(int x)
+{
+   return x + 3;
+}
+
+int[*] recFunc(int[*] arr)
+{
+   if (dim(arr) == 0)
+   {
+      res = func(arr);
+   }
+   else
+   {
+      res = with
+      {
+         (.<= [i] < take([1], shape(arr))) : recFunc(arr[i]);
+      }:modarray(arr);
+   }
+   return res;
+}
