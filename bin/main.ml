@@ -108,13 +108,13 @@ let _parsevariables str = let
   List.map makevariable list
 
 
-type expr = Sequence of expr * expr (* effectively a list *)
-          | Brackets of expr (* for { } brackets *)
-          | RoundBrackets of expr (* for ( ) brackets *)
-          | Function of ctype * string * variable list* expr (*a function has a type a name , a lis tof arguments and a body *)
-          | Unprocessed of string (* for rext we have not or can not pocess yet *)
-          | Import of string (* for imports at teh top of the file *)
-          | Whitespace (* for whitespace *)
+type expr3 = Sequence of expr3 * expr3 (* effectively a list *)
+           | Brackets3 of expr3 (* for { } brackets *)
+           | RoundBrackets of expr3 (* for ( ) brackets *)
+           | Function of ctype * string * variable list* expr3 (*a function has a type a name , a lis tof arguments and a body *)
+           | Unprocessed of string (* for rext we have not or can not pocess yet *)
+           | Import of string (* for imports at teh top of the file *)
+           | Whitespace (* for whitespace *)
 
 let parseExpr str = 
   let rec parseBrackets str carry prev = (* parse the brackets {} first,
@@ -124,7 +124,7 @@ let parseExpr str =
       let parsed = parseBrackets xs [] prev (* this parse will return onc eit finds a closing bracket. the text after the bracket is snd of the tuple it returns*)
       in 
       Sequence (Unprocessed (charListToString <| List.rev carry), (* the text *)
-                Sequence (Brackets (fst parsed),
+                Sequence (Brackets3 (fst parsed),
                           fst <| parseBrackets (snd parsed) [] '{')), [] (* here we handle the "what the expression still has to parse" so we can pass nothing ([])*)
     | '}' :: xs -> (* TODO: check if there are valid non whitespace *)
       if (prev == '{') then Unprocessed (charListToString <| List.rev carry), xs (* we found a closing bracket so we return here with the rest of the text as the second of the tuple *)
@@ -163,7 +163,7 @@ let parseExpr str =
         Sequence (processUnprocessed debth x, processUnprocessed debth y)
       else 
         Sequence (processUnprocessed debth x, processUnprocessed debth y)
-    | Brackets x -> Brackets (processUnprocessed (debth + 1) x)
+    | Brackets3 x -> Brackets3 (processUnprocessed (debth + 1) x)
     | RoundBrackets x -> RoundBrackets x
     | Import x -> Import x
     | Whitespace -> Whitespace
@@ -187,9 +187,9 @@ let replicate str i =
 let exprToString expr =
   let rec exprToString' expr tabs = match expr with
       Sequence (x, y) -> exprToString' x tabs ^ exprToString' y tabs
-    |  Brackets x -> replicate "   " tabs ^"{\n" 
-                     ^ exprToString' x (tabs+1) 
-                     ^ replicate "   " tabs^ "}"
+    |  Brackets3 x -> replicate "   " tabs ^"{\n" 
+                      ^ exprToString' x (tabs+1) 
+                      ^ replicate "   " tabs^ "}"
     | RoundBrackets x -> "(" 
                          ^ exprToString' x tabs 
                          ^ ")"
@@ -203,9 +203,9 @@ let exprToString expr =
 let showExpr expr =
   let rec showExpr' expr tabs = match expr with
       Sequence (x, y) -> showExpr' x tabs ^"\n"^ showExpr' y tabs
-    |  Brackets x ->  replicate "   " tabs^"Brackets:" ^"{\n"^ replicate "   " tabs
-                      ^ showExpr' x (tabs+1) 
-                      ^ replicate "   " tabs^ "}"
+    |  Brackets3 x ->  replicate "   " tabs^"Brackets:" ^"{\n"^ replicate "   " tabs
+                       ^ showExpr' x (tabs+1) 
+                       ^ replicate "   " tabs^ "}"
     | RoundBrackets x -> replicate "   " tabs^"(" 
                          ^ showExpr' x tabs 
                          ^ ")"
@@ -225,9 +225,9 @@ type expr2 =  Brackets2 of expr2
            | Plus of string
            | Sequence of expr2 list
 
-let _fuckerrors = Brackets2 (Plus "d")
 
-let expr2ToString exp =
+
+let _expr2ToString exp =
   let rec expr2ToString' exp = match exp with
       Brackets2 exp -> "(" ^ (expr2ToString' exp) ^ ")"
     | Sequence l -> List.map expr2ToString' l 
@@ -242,16 +242,103 @@ let cons x xs = x :: xs
 let _parse_seq first rest = 
   lift2 (cons) first (many rest)
 
-let parser = 
+let _parser = 
   fix (fun expr ->
-      let brackets = char '('*> expr <* char ')'>>| (fun x -> Brackets2 x) in
-      let plus = brackets <|> char '+' *> return (Plus "++") in
-      let sequence = ( many plus >>| (fun x -> Sequence x)) in
-      sequence)
+      let brackets2 = char '('*> expr <* char ')'>>| (fun x -> Brackets2 x) in
+      let plus2 = brackets2 <|> char '+' *> return (Plus "++") in
+      let sequence2 = ( many plus2 >>| (fun x -> Sequence x)) in
+      sequence2)
+
+let is_whitespace = function
+  | '\x20' | '\x0a' | '\x0d' | '\x09' -> true
+  | _ -> false
 
 
 
-let convert str =
+let whitespace = take_while is_whitespace
+
+let is_letter c = Char.lowercase_ascii c
+                  |> Char.code
+                  |> fun c -> not (c < Char.code 'a'|| c > Char.code 'z')
+
+let word = take_while1 (is_letter)
+
+type value = Star
+           | Num of int
+           | Var of string
+
+let integer =
+  take_while1 (function '0' .. '9' -> true | _ -> false) >>| int_of_string
+
+let p_value = 
+  let star = char '*' *> return Star in 
+  let int = integer >>| fun x -> Num x in
+  let var = word >>| fun x -> Var x in
+  int <|>  star <|> var
+
+let value_to_string v = match v with 
+    Star -> "*"
+  | Num x -> Int.to_string x
+  | Var s -> s
+
+let values_list_to_string l = if (l == []) 
+  then "" 
+  else l 
+       |> List.map value_to_string 
+       |> (fun x -> intersperse x ",")
+       |> String.concat ""
+       |> fun x -> "["^x^"]" 
+
+type datatype = Int of value list
+
+
+let p_value_list = char '[' *> (lift2 (fun x y -> List.append x [y]) (many (p_value <* char ',')) (p_value)) <* char ']'
+
+let p_datatype = (string "int" *> p_value_list >>| fun x -> Int x)<|>
+                 string "int" *> return (Int [])
+
+
+type expr = Plus of expr * expr
+          | Value of value
+          | Brackets of expr
+
+
+let expr_to_string expr = 
+  let rec tostr expr = match expr with 
+    | Plus (e1,e2)-> "("^tostr e1 ^" + "^ tostr e2^")"
+    | Value v -> value_to_string v
+    | Brackets e -> "("^tostr e^")"
+  in 
+  tostr expr
+
+
+(*TODO: try to see if the order of secuential + can go from left to right. (so (a+b)+c instead of a + (b + c) ) *)
+let parse_expr = 
+  fix (fun expr ->
+      let value = p_value >>| fun x -> Value x in
+      let brackets = (char '('*> whitespace *> expr <* whitespace <* char ')'>>| (fun x -> Brackets x)) in
+      let plus = lift2 (fun x y -> Plus (x,y)) ((brackets <|> value) <* whitespace <* char '+') (whitespace *> expr) in (* (brackets <|> value) is expr but without the plus to avoid infinite loops *)
+      brackets <|> plus <|> value
+    )
+
+
+type program = Import of string * string
+             | Variable of datatype * string
+             | Return of expr
+
+let program_to_string p = match p with 
+    Import (s1, s2) -> "use " ^s1 ^ " : "^s2^";"
+  | Variable ((Int list), name) -> "int" ^ values_list_to_string list ^" "^name^";"
+  | Return e -> "return " ^expr_to_string e ^ ";"
+
+let p_program = 
+  let p_return = string "return" *> whitespace *> parse_expr <* whitespace <* char ';' >>| fun x -> Return x in
+  let p_variable = lift2 (fun x y -> Variable (x,y)) p_datatype (whitespace *> word <* whitespace) in
+  let p_import = lift2 (fun x y -> Import (x,y)) (string "use" *> whitespace *> word <* whitespace <* char ':' <* whitespace)  (word <* whitespace <* char ';')in
+  p_return <|> p_import <|> (p_variable <* char ';')
+
+
+let convert parser str  =
   match parse_string ~consume:All parser str with
   | Ok v      -> v
   | Error msg -> failwith msg
@@ -266,7 +353,7 @@ processinput input
 
 print_endline "\n\n\n";
 
-"((+)+)(+)"
-|> convert 
-|> expr2ToString
+"return 3 + 3 + 4;"
+|> convert p_program
+|> program_to_string
 |>print_endline;;
