@@ -90,7 +90,7 @@ type ctype = Type of string
 let ctypeToStr c = match c with 
     Type s -> String.trim s
 
-type variable = Variable of ctype * string (* a variable is a type and a name *) 
+type variable2 = Variable of ctype * string (* a variable is a type and a name *) 
 
 let variabletostring var = match var with 
     Variable (t,s) -> ctypeToStr t ^ " " ^ s 
@@ -111,7 +111,7 @@ let _parsevariables str = let
 type expr3 = Sequence of expr3 * expr3 (* effectively a list *)
            | Brackets3 of expr3 (* for { } brackets *)
            | RoundBrackets of expr3 (* for ( ) brackets *)
-           | Function of ctype * string * variable list* expr3 (*a function has a type a name , a lis tof arguments and a body *)
+           | Function of ctype * string * variable2 list* expr3 (*a function has a type a name , a lis tof arguments and a body *)
            | Unprocessed of string (* for rext we have not or can not pocess yet *)
            | Import of string (* for imports at teh top of the file *)
            | Whitespace (* for whitespace *)
@@ -244,9 +244,9 @@ let _parse_seq first rest =
 
 let _parser = 
   fix (fun expr ->
-      let brackets2 = char '('*> expr <* char ')'>>| (fun x -> Brackets2 x) in
+      let brackets2 = lift (fun x -> Brackets2 x) (char '('*> expr <* char ')')  in
       let plus2 = brackets2 <|> char '+' *> return (Plus "++") in
-      let sequence2 = ( many plus2 >>| (fun x -> Sequence x)) in
+      let sequence2 = lift (fun x -> Sequence x) ( many plus2 ) in
       sequence2)
 
 let is_whitespace = function
@@ -263,17 +263,26 @@ let is_letter c = Char.lowercase_ascii c
 
 let word = take_while1 (is_letter)
 
+let p_comma_separated_list parser = lift2 (fun x y -> List.append x [y]) (many (parser <* whitespace <* char ',' <* whitespace)) ( parser)
+
+let comma_separated_list_to_string tostr l = if (l == []) 
+  then "" 
+  else l 
+       |> List.map tostr 
+       |> (fun x -> intersperse x ",")
+       |> String.concat ""
+
 type value = Star
            | Num of int
            | Var of string
 
 let integer =
-  take_while1 (function '0' .. '9' -> true | _ -> false) >>| int_of_string
+  lift int_of_string (take_while1 (function '0' .. '9' -> true | _ -> false))
 
 let p_value = 
   let star = char '*' *> return Star in 
-  let int = integer >>| fun x -> Num x in
-  let var = word >>| fun x -> Var x in
+  let int = lift (fun x -> Num x) integer in
+  let var = lift (fun x -> Var x) word  in
   int <|>  star <|> var
 
 let value_to_string v = match v with 
@@ -281,20 +290,16 @@ let value_to_string v = match v with
   | Num x -> Int.to_string x
   | Var s -> s
 
-let values_list_to_string l = if (l == []) 
-  then "" 
-  else l 
-       |> List.map value_to_string 
-       |> (fun x -> intersperse x ",")
-       |> String.concat ""
-       |> fun x -> "["^x^"]" 
+let values_list_to_string l = if List.length l != 0 then "["^comma_separated_list_to_string value_to_string l ^"]" else ""
 
 type datatype = Int of value list
 
+let datatype_to_string d = match d with
+    Int list -> "int" ^ values_list_to_string list
 
-let p_value_list = char '[' *> (lift2 (fun x y -> List.append x [y]) (many (p_value <* char ',')) (p_value)) <* char ']'
+let p_value_list = p_comma_separated_list p_value 
 
-let p_datatype = (string "int" *> p_value_list >>| fun x -> Int x)<|>
+let p_datatype = lift (fun x -> Int x) (string "int" *> char '[' *> p_value_list <* char ']')<|>
                  string "int" *> return (Int [])
 
 
@@ -316,26 +321,44 @@ let expr_to_string expr =
 let parse_expr = 
   fix (fun expr ->
       let value = p_value >>| fun x -> Value x in
-      let brackets = (char '('*> whitespace *> expr <* whitespace <* char ')'>>| (fun x -> Brackets x)) in
+      let brackets = lift (fun x -> Brackets x) (char '('*> whitespace *> expr <* whitespace <* char ')') in
       let plus = lift2 (fun x y -> Plus (x,y)) ((brackets <|> value) <* whitespace <* char '+') (whitespace *> expr) in (* (brackets <|> value) is expr but without the plus to avoid infinite loops *)
       brackets <|> plus <|> value
     )
 
+type variable = Variable of datatype * string
+
+let variable_to_string v = match v with 
+    Variable (datatype, name) -> datatype_to_string datatype ^" "^name
+
+let p_variable = lift2 (fun x y -> Variable (x,y)) p_datatype (whitespace *> word <* whitespace)
 
 type program = Import of string * string
-             | Variable of datatype * string
+             | Var of variable
              | Return of expr
+             | Function of datatype * string * variable list * program 
 
-let program_to_string p = match p with 
-    Import (s1, s2) -> "use " ^s1 ^ " : "^s2^";"
-  | Variable ((Int list), name) -> "int" ^ values_list_to_string list ^" "^name^";"
-  | Return e -> "return " ^expr_to_string e ^ ";"
+let program_to_string p = 
+  let rec program_to_string' p tabs = 
+    let tabs_string = replicate "    " tabs in
+    match p with 
+      Import (s1, s2) -> tabs_string ^ "use " ^s1 ^ " : "^s2^";"
+    | Var variable -> tabs_string ^ variable_to_string variable^";"
+    | Return e -> tabs_string ^ "return " ^expr_to_string e ^ ";"
+    | Function (datatype, name, inputs, program) -> tabs_string ^ datatype_to_string datatype ^ " "^ name ^ "(" ^ comma_separated_list_to_string variable_to_string inputs ^")\n"
+                                                    ^tabs_string ^ "{\n" 
+                                                    ^tabs_string ^  program_to_string' program (tabs+1)^ "\n" 
+                                                    ^tabs_string ^ "}"
+  in 
+  program_to_string' p 0
 
-let p_program = 
-  let p_return = string "return" *> whitespace *> parse_expr <* whitespace <* char ';' >>| fun x -> Return x in
-  let p_variable = lift2 (fun x y -> Variable (x,y)) p_datatype (whitespace *> word <* whitespace) in
-  let p_import = lift2 (fun x y -> Import (x,y)) (string "use" *> whitespace *> word <* whitespace <* char ':' <* whitespace)  (word <* whitespace <* char ';')in
-  p_return <|> p_import <|> (p_variable <* char ';')
+let p_program = fix (fun program ->
+    let p_return = lift (fun x -> Return x) (string "return" *> whitespace *> parse_expr <* whitespace <* char ';') in
+    let p_var = lift (fun x -> Var x) p_variable in
+    let p_import = lift2 (fun x y -> Import (x,y)) (string "use" *> whitespace *> word <* whitespace <* char ':' <* whitespace)  (word <* whitespace <* char ';')in
+    let p_function = lift4 (fun a b c d -> Function (a,b,c,d)) p_datatype (whitespace *> word) (char '(' *> p_comma_separated_list p_variable <* char ')') (whitespace *> char '{' *> whitespace *> program <* whitespace <* char '}') in
+    p_return <|> p_function <|> p_import <|> (p_var <* char ';')
+  )
 
 
 let convert parser str  =
@@ -353,7 +376,10 @@ processinput input
 
 print_endline "\n\n\n";
 
-"return 3 + 3 + 4;"
+"int func(int x)
+{
+   return x + 3;
+}"
 |> convert p_program
 |> program_to_string
 |>print_endline;;
