@@ -306,6 +306,7 @@ let p_datatype = lift (fun x -> Int x) (string "int" *> char '[' *> p_value_list
 type expr = Plus of expr * expr
           | Value of value
           | Brackets of expr
+          | Function_call of string * expr
 
 
 let expr_to_string expr = 
@@ -313,17 +314,21 @@ let expr_to_string expr =
     | Plus (e1,e2)-> "("^tostr e1 ^" + "^ tostr e2^")"
     | Value v -> value_to_string v
     | Brackets e -> "("^tostr e^")"
+    | Function_call (name, expr) -> name ^"("^ tostr expr ^ ")"
   in 
   tostr expr
 
 
-(*TODO: try to see if the order of secuential + can go from left to right. (so (a+b)+c instead of a + (b + c) ) *)
-let parse_expr = 
+(*TODO: try to see if the order of secuential + can go from left to right. (so (a+b)+c instead of a + (b + c) ) note: can probably only be done by parsing backwards. maybe fix this afer processing???*)
+(*TODO: add boolean logic operators *)
+(*TODO: add with loops *)
+let p_expr = 
   fix (fun expr ->
-      let value = p_value >>| fun x -> Value x in
+      let value = lift (fun x -> Value x) p_value in
       let brackets = lift (fun x -> Brackets x) (char '('*> whitespace *> expr <* whitespace <* char ')') in
-      let plus = lift2 (fun x y -> Plus (x,y)) ((brackets <|> value) <* whitespace <* char '+') (whitespace *> expr) in (* (brackets <|> value) is expr but without the plus to avoid infinite loops *)
-      brackets <|> plus <|> value
+      let function_call = lift2 (fun x y -> Function_call (x,y)) word (char '(' *> whitespace *> expr <* whitespace <* char ')')in
+      let plus = lift2 (fun x y -> Plus (x,y)) ((function_call <|> brackets <|> value) <* whitespace <* char '+') (whitespace *> expr) in (* (brackets <|> value) is expr but without the plus to avoid infinite loops *)
+      plus <|> function_call <|> brackets  <|> value
     )
 
 type variable = Variable of datatype * string
@@ -337,6 +342,9 @@ type program = Import of string * string
              | Var of variable
              | Return of expr
              | Function of datatype * string * variable list * program 
+             | Assignment of string * expr
+             | If of expr * program * program option
+             | Sequence of program list
 
 let program_to_string p = 
   let rec program_to_string' p tabs = 
@@ -348,16 +356,37 @@ let program_to_string p =
     | Function (datatype, name, inputs, program) -> tabs_string ^ datatype_to_string datatype ^ " "^ name ^ "(" ^ comma_separated_list_to_string variable_to_string inputs ^")\n"
                                                     ^tabs_string ^ "{\n" 
                                                     ^tabs_string ^  program_to_string' program (tabs+1)^ "\n" 
-                                                    ^tabs_string ^ "}"
-  in 
+                                                    ^tabs_string ^ "}\n"
+    | Assignment (word, expr) -> tabs_string ^ word ^" = " ^expr_to_string expr ^ ";"
+    | Sequence l -> List.map (fun x -> program_to_string' x tabs) l |> fun x -> intersperse x "\n" |> String.concat ""
+    | If (cond , block1, opt_block2) -> tabs_string ^ "if("^ expr_to_string cond ^")\n"
+                                        ^ tabs_string ^ "{\n"
+                                        ^ program_to_string' block1 (tabs+1) ^ "\n"
+                                        ^ tabs_string ^ "}\n" ^
+                                        (match opt_block2 with 
+                                           Some block2 -> tabs_string ^ "else\n"
+                                                          ^ tabs_string ^ "{\n"
+                                                          ^ program_to_string' block2 (tabs+1) ^ "\n"
+                                                          ^ tabs_string ^ "}\n"
+                                         | None -> "")
+  in
+
   program_to_string' p 0
 
 let p_program = fix (fun program ->
-    let p_return = lift (fun x -> Return x) (string "return" *> whitespace *> parse_expr <* whitespace <* char ';') in
-    let p_var = lift (fun x -> Var x) p_variable in
+    let p_return = lift (fun x -> Return x) (string "return" *> whitespace *> p_expr <* whitespace <* char ';') in
+    let p_var = lift (fun x -> Var x) p_variable <* char ';' in
+    let p_assignment = lift2 (fun x y -> Assignment (x,y)) (word <* whitespace <* char '=') (whitespace *> p_expr <* whitespace <* char ';') in 
     let p_import = lift2 (fun x y -> Import (x,y)) (string "use" *> whitespace *> word <* whitespace <* char ':' <* whitespace)  (word <* whitespace <* char ';')in
     let p_function = lift4 (fun a b c d -> Function (a,b,c,d)) p_datatype (whitespace *> word) (char '(' *> p_comma_separated_list p_variable <* char ')') (whitespace *> char '{' *> whitespace *> program <* whitespace <* char '}') in
-    p_return <|> p_function <|> p_import <|> (p_var <* char ';')
+    let p_if = (let p_only_if =  lift2 (fun x y -> If (x,y,None)) (string "if" *> whitespace *> char '('*> p_expr <* char ')'<* whitespace) 
+                    (char '{' *> whitespace *> program <* whitespace <* char '}'<* whitespace)  in
+                let p_if_else = lift3 (fun x y z -> If (x,y,Some z)) (string "if" *> whitespace *> char '('*> p_expr <* char ')'<* whitespace) 
+                    (char '{' *> whitespace *> program <* whitespace <* char '}' <* whitespace) 
+                    (string "else" *> whitespace *> char '{' *> whitespace *> program <* whitespace <* char '}'<* whitespace) in
+                p_if_else <|> p_only_if)in
+   let parse = p_if <|> p_assignment <|> p_return <|> p_function <|> p_import <|> p_var in
+   lift (fun x -> Sequence x) (many1 (parse <* whitespace))
   )
 
 
@@ -378,7 +407,18 @@ print_endline "\n\n\n";
 
 "int func(int x)
 {
-   return x + 3;
+   return x(3) + 3;
+}
+int func(int x)
+{
+   if (dim(arr) + 0)
+   {
+      res = func(arr);
+   }
+   else
+   {
+      res = func(arr);
+   }
 }"
 |> convert p_program
 |> program_to_string
