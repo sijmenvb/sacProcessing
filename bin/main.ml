@@ -304,6 +304,7 @@ let p_datatype = lift (fun x -> Int x) (string "int" *> char '[' *> p_value_list
 
 
 type expr = Plus of expr * expr
+          | Boolean of expr * string * expr
           | Value of value
           | Brackets of expr
           | Function_call of string * expr
@@ -315,20 +316,23 @@ let expr_to_string expr =
     | Value v -> value_to_string v
     | Brackets e -> "("^tostr e^")"
     | Function_call (name, expr) -> name ^"("^ tostr expr ^ ")"
+    | Boolean (e1,operator,e2) -> "("^tostr e1 ^" "^ operator ^ " "^ tostr e2^")"
   in 
   tostr expr
 
 
 (*TODO: try to see if the order of secuential + can go from left to right. (so (a+b)+c instead of a + (b + c) ) note: can probably only be done by parsing backwards. maybe fix this afer processing???*)
-(*TODO: add boolean logic operators *)
 (*TODO: add with loops *)
 let p_expr = 
+  let boolean_seperator = string "==" <|> string "<=" <|>string ">=" <|>string "<" <|> string ">" <|> string "&&" <|> string "==" in
   fix (fun expr ->
       let value = lift (fun x -> Value x) p_value in
       let brackets = lift (fun x -> Brackets x) (char '('*> whitespace *> expr <* whitespace <* char ')') in
       let function_call = lift2 (fun x y -> Function_call (x,y)) word (char '(' *> whitespace *> expr <* whitespace <* char ')')in
-      let plus = lift2 (fun x y -> Plus (x,y)) ((function_call <|> brackets <|> value) <* whitespace <* char '+') (whitespace *> expr) in (* (brackets <|> value) is expr but without the plus to avoid infinite loops *)
-      plus <|> function_call <|> brackets  <|> value
+      let single = function_call <|> brackets <|> value in
+      let plus = lift2 (fun x y -> Plus (x,y)) (single <* whitespace <* char '+') (whitespace *> expr) in (* (brackets <|> value) is expr but without the plus to avoid infinite loops *)
+      let boolean = lift3 (fun x y z-> Boolean (x,y,z)) (plus <* whitespace ) (boolean_seperator) (whitespace *> expr) <|> lift3 (fun x y z-> Boolean (x,y,z)) ((single) <* whitespace ) (boolean_seperator) (whitespace *> expr) in (* i'm using it twice here since plus <|> single does not seem to work *)
+      boolean <|> plus <|> single
     )
 
 type variable = Variable of datatype * string
@@ -385,8 +389,8 @@ let p_program = fix (fun program ->
                     (char '{' *> whitespace *> program <* whitespace <* char '}' <* whitespace) 
                     (string "else" *> whitespace *> char '{' *> whitespace *> program <* whitespace <* char '}'<* whitespace) in
                 p_if_else <|> p_only_if)in
-   let parse = p_if <|> p_assignment <|> p_return <|> p_function <|> p_import <|> p_var in
-   lift (fun x -> Sequence x) (many1 (parse <* whitespace))
+    let parse = p_if <|> p_assignment <|> p_return <|> p_function <|> p_import <|> p_var in
+    lift (fun x -> Sequence x) (many1 (parse <* whitespace))
   )
 
 
@@ -411,7 +415,7 @@ print_endline "\n\n\n";
 }
 int func(int x)
 {
-   if (dim(arr) + 0)
+   if (dim(arr) + 4 == 0)
    {
       res = func(arr);
    }
