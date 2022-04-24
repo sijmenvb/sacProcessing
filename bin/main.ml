@@ -303,20 +303,30 @@ let p_datatype = lift (fun x -> Int x) (string "int" *> char '[' *> p_value_list
                  string "int" *> return (Int [])
 
 
+
 type expr = Plus of expr * expr
           | Boolean of expr * string * expr
           | Value of value
           | Brackets of expr
-          | Function_call of string * expr
-
+          | Function_call of string * expr list
+          | With_loop of expr * expr * expr (*of type   with {expr : expr ;} : expr*)
+          | Array of expr list
+          | ExprWithIndex of expr * expr list
+          | Dot
+          | MDot
 
 let expr_to_string expr = 
   let rec tostr expr = match expr with 
     | Plus (e1,e2)-> "("^tostr e1 ^" + "^ tostr e2^")"
     | Value v -> value_to_string v
     | Brackets e -> "("^tostr e^")"
-    | Function_call (name, expr) -> name ^"("^ tostr expr ^ ")"
+    | Function_call (name, exprList) -> name ^"("^ String.concat "," (List.map tostr exprList) ^ ")"
     | Boolean (e1,operator,e2) -> "("^tostr e1 ^" "^ operator ^ " "^ tostr e2^")"
+    | With_loop (typeset,gen_exprs,operations) -> "with {" ^ tostr typeset ^ " : " ^ tostr gen_exprs ^ "; " ^ tostr operations ^ ";"
+    | Array exprList -> "[" ^ String.concat "," (List.map tostr exprList) ^ "]"
+    | Dot -> "."
+    | MDot -> "..."
+    | ExprWithIndex (expr,exprList )-> tostr expr ^ "[" ^ String.concat "," (List.map tostr exprList) ^ "]"
   in 
   tostr expr
 
@@ -326,13 +336,32 @@ let expr_to_string expr =
 let p_expr = 
   let boolean_seperator = string "==" <|> string "<=" <|>string ">=" <|>string "<" <|> string ">" <|> string "&&" <|> string "==" in
   fix (fun expr ->
-      let value = lift (fun x -> Value x) p_value in
-      let brackets = lift (fun x -> Brackets x) (char '('*> whitespace *> expr <* whitespace <* char ')') in
-      let function_call = lift2 (fun x y -> Function_call (x,y)) word (char '(' *> whitespace *> expr <* whitespace <* char ')')in
-      let single = function_call <|> brackets <|> value in
-      let plus = lift2 (fun x y -> Plus (x,y)) (single <* whitespace <* char '+') (whitespace *> expr) in (* (brackets <|> value) is expr but without the plus to avoid infinite loops *)
-      let boolean = lift3 (fun x y z-> Boolean (x,y,z)) (plus <* whitespace ) (boolean_seperator) (whitespace *> expr) <|> lift3 (fun x y z-> Boolean (x,y,z)) ((single) <* whitespace ) (boolean_seperator) (whitespace *> expr) in (* i'm using it twice here since plus <|> single does not seem to work *)
-      boolean <|> plus <|> single
+      let value = lift (fun x -> Value x) p_value 
+      in
+      let brackets = lift (fun x -> Brackets x) (char '('*> whitespace *> expr <* whitespace <* char ')')
+      in
+      let function_call = lift2 (fun x y -> Function_call (x,y)) word (char '(' *> p_comma_separated_list (whitespace *> expr) <* whitespace <* char ')')
+      in
+      let with_loop = lift3 (fun x y z-> With_loop (x,y,z)) (whitespace *> string "with" *> whitespace *> char '{' *> whitespace *> expr ) 
+          (whitespace *> char ':' *> whitespace *> expr <* whitespace <* char ';') 
+          ( whitespace *> char '}' *> whitespace *> char ':' *> expr <* whitespace)
+      in
+      let array = lift (fun x -> Array (x)) (char '[' *> p_comma_separated_list (whitespace *> expr) <* whitespace <* char ']')
+      in
+      let dot = lift (fun _ -> Dot) (char '.')
+      in
+      let mdot = lift (fun _ -> MDot) (string "...")
+      in
+      let single = mdot <|> dot <|> array <|> with_loop <|> function_call <|> brackets <|> value (* use of single to prevent infinite loop *)
+      in
+      let exprWithIndex = lift2 (fun x y -> ExprWithIndex (x,y)) (single) (p_comma_separated_list expr) 
+      in
+      let plus = lift2 (fun x y -> Plus (x,y)) ((exprWithIndex <|> single) <* whitespace <* char '+') (whitespace *> expr) 
+      in 
+      let boolean = lift3 (fun x y z-> Boolean (x,y,z)) (plus <* whitespace ) (boolean_seperator) (whitespace *> expr) 
+                    <|> lift3 (fun x y z-> Boolean (x,y,z)) ((exprWithIndex <|> single) <* whitespace ) (boolean_seperator) (whitespace *> expr) (* i'm using it twice here since plus <|> single does not seem to work *)
+      in 
+      boolean <|> plus <|> exprWithIndex <|> single
     )
 
 type variable = Variable of datatype * string
@@ -421,7 +450,10 @@ int func(int x)
    }
    else
    {
-      res = func(arr);
+      res = with
+      {
+         (. <= [i] < take([1], shape(arr))) : recFunc(arr[i]);
+      }:modarray(arr);
    }
 }"
 |> convert p_program
