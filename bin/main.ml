@@ -307,12 +307,12 @@ let loadDependencies program =
     | Function (datatype, name, inputs, program, _) ->(let preprocessed = loadDependencies' program in 
                                                        let new_dep = tuple_second preprocessed
                                                        in (Function (datatype, name, inputs,tuple_first preprocessed, new_dep),new_dep))
-    | Assignment (word, expr, _) ->      (let new_dep = expr_to_dependency expr
-                                          in (Assignment (word, expr, new_dep),new_dep))
+    | Assignment (word, expr, _) -> (let new_dep = expr_to_dependency expr
+                                     in (Assignment (word, expr, new_dep),new_dep))
     | Sequence (list, _) -> (let preprocessed_list = process_list list in
                              (Sequence (tuple_first preprocessed_list, tuple_second preprocessed_list), tuple_second preprocessed_list))
     | If (cond , block1, opt_block2, _) -> (match opt_block2 with 
-          Some block2 -> (let new_dep = combineDependencies (tuple_second (loadDependencies' block1)) (tuple_second (loadDependencies' block2)) in
+          Some block2 -> (let new_dep = combineDependencies (combineDependencies (tuple_second (loadDependencies' block1)) (tuple_second (loadDependencies' block2))) (expr_to_dependency cond) in
                           (If (cond ,tuple_first (loadDependencies' block1), Some (tuple_first (loadDependencies' block2)), new_dep),new_dep))
         | None -> (let new_dep = (tuple_second (loadDependencies' block1)) in
                    (If (cond ,tuple_first (loadDependencies' block1), None, new_dep),new_dep)))
