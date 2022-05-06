@@ -197,16 +197,14 @@ let variable_to_string v = match v with
 let p_variable = lift2 (fun x y -> Variable (x,y)) p_datatype (whitespace *> word <* whitespace)
 
 type dependency = 
-    Function_calls of string list
+    Dependencies of string list * bool (*function calls , is it a recusive function*)
   | No_Dependency
   | Not_Loaded
   | Error
 
 
-let _setlist = Function_calls [] (* remove this *)
-
 let dependency_to_string dependency = match dependency with 
-    Function_calls list -> "function calls: " ^ String.concat ", " list
+    Dependencies (list , recusivce ) -> (if recusivce then "recursive! " else "") ^ ("function calls: " ^ String.concat ", " list) 
   | No_Dependency -> "no dependency"
   | Not_Loaded -> "dependency not loaded."
   | Error -> "ERROR COMPUTING DEPENDENCIES!"
@@ -269,36 +267,42 @@ let list_append_unique l1 l2 =
     | [] -> l1
   in apend l1 l2
 
-let combineDependencies dep1 dep2 = match (dep1,dep2) with 
-    (Function_calls l1, Function_calls l2) -> Function_calls (list_append_unique l1 l2)
-  | (Function_calls l1 , _) -> Function_calls l1
-  | (_, Function_calls l2) -> Function_calls l2
+let combine_dependencies dep1 dep2 = match (dep1,dep2) with 
+    (Dependencies (l1,_ ), Dependencies (l2,_ )) -> Dependencies ((list_append_unique l1 l2), false)
+  | (Dependencies (l1,_ ) , _) -> Dependencies (l1, false)
+  | (_, Dependencies (l2,_ )) -> Dependencies (l2, false)
   | (No_Dependency,_) -> No_Dependency
-  |(_,No_Dependency) -> No_Dependency
-  |_ -> Error
+  | (_,No_Dependency) -> No_Dependency
+  | _ -> Error
 
 let expr_to_dependency expr =
   let nothing = No_Dependency in
 
   let rec expr_to_dependency' expr = 
-    (let list_to_dep l = List.fold_left combineDependencies nothing (List.map expr_to_dependency' l) in 
+    (let list_to_dep l = List.fold_left combine_dependencies nothing (List.map expr_to_dependency' l) in 
      match expr with 
-     | Plus (e1,e2)-> combineDependencies (expr_to_dependency' e1) (expr_to_dependency' e2)
+     | Plus (e1,e2)-> combine_dependencies (expr_to_dependency' e1) (expr_to_dependency' e2)
      | Value _ -> nothing
      | Brackets e -> (expr_to_dependency' e)
-     | Function_call (name, exprList) -> combineDependencies (Function_calls [name]) (list_to_dep exprList)
-     | Boolean (e1,_,e2) -> combineDependencies (expr_to_dependency' e1) (expr_to_dependency' e2)
-     | With_loop (typeset,gen_exprs,operations) -> combineDependencies (combineDependencies (expr_to_dependency' typeset) (expr_to_dependency' gen_exprs)) (expr_to_dependency' operations)
+     | Function_call (name, exprList) -> combine_dependencies (Dependencies ([name],false)) (list_to_dep exprList)
+     | Boolean (e1,_,e2) -> combine_dependencies (expr_to_dependency' e1) (expr_to_dependency' e2)
+     | With_loop (typeset,gen_exprs,operations) -> combine_dependencies (combine_dependencies (expr_to_dependency' typeset) (expr_to_dependency' gen_exprs)) (expr_to_dependency' operations)
      | Array exprList -> (list_to_dep exprList)
      | Dot -> nothing
      | MDot -> nothing
-     | ExprWithIndex (expr, exprList )-> combineDependencies (expr_to_dependency' expr) (list_to_dep exprList) )
+     | ExprWithIndex (expr, exprList )-> combine_dependencies (expr_to_dependency' expr) (list_to_dep exprList) )
   in
   expr_to_dependency' expr
 
+(* takes a name and a dependency and returns a dependency if the name is in the list of function calls *)
+let is_recursive name dependency = match dependency with
+    Dependencies (list , _) -> Dependencies (list , List.exists (String.equal name) list )
+  | dep -> dep
+
+
 let loadDependencies program = 
   let rec loadDependencies' program = 
-    let process_list l = let new_list = List.map loadDependencies' l in (List.map tuple_first new_list ,List.fold_left combineDependencies Not_Loaded (List.map tuple_second new_list)  ) in
+    let process_list l = let new_list = List.map loadDependencies' l in (List.map tuple_first new_list ,List.fold_left combine_dependencies Not_Loaded (List.map tuple_second new_list)) in
     match program with (* returns a tuple of a program with the dependencies sored in it and the last aggragate dependency *)
       Import (s1, s2, _) -> (Import (s1, s2, No_Dependency), No_Dependency)
     | Var (variable, _) -> (Var (variable, No_Dependency), No_Dependency)
@@ -306,13 +310,13 @@ let loadDependencies program =
                         (Return (e, new_dep),new_dep))
     | Function (datatype, name, inputs, program, _) ->(let preprocessed = loadDependencies' program in 
                                                        let new_dep = tuple_second preprocessed
-                                                       in (Function (datatype, name, inputs,tuple_first preprocessed, new_dep),new_dep))
+                                                       in (Function (datatype, name, inputs,tuple_first preprocessed, is_recursive name new_dep),new_dep))
     | Assignment (word, expr, _) -> (let new_dep = expr_to_dependency expr
                                      in (Assignment (word, expr, new_dep),new_dep))
     | Sequence (list, _) -> (let preprocessed_list = process_list list in
                              (Sequence (tuple_first preprocessed_list, tuple_second preprocessed_list), tuple_second preprocessed_list))
     | If (cond , block1, opt_block2, _) -> (match opt_block2 with 
-          Some block2 -> (let new_dep = combineDependencies (combineDependencies (tuple_second (loadDependencies' block1)) (tuple_second (loadDependencies' block2))) (expr_to_dependency cond) in
+          Some block2 -> (let new_dep = combine_dependencies (combine_dependencies (tuple_second (loadDependencies' block1)) (tuple_second (loadDependencies' block2))) (expr_to_dependency cond) in
                           (If (cond ,tuple_first (loadDependencies' block1), Some (tuple_first (loadDependencies' block2)), new_dep),new_dep))
         | None -> (let new_dep = (tuple_second (loadDependencies' block1)) in
                    (If (cond ,tuple_first (loadDependencies' block1), None, new_dep),new_dep)))
