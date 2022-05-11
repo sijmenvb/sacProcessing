@@ -236,7 +236,7 @@ let program_to_string p =
                                                          ^tabs_string ^  program_to_string' program (tabs+1)^ "\n" 
                                                          ^tabs_string ^ "}\n"
     | Assignment (word, expr, dep) -> tabs_string ^ word ^" = " ^expr_to_string expr tabs_string^ "; // " ^ dependency_to_string dep
-    | Sequence (l, _) -> (List.map (fun x -> program_to_string' x tabs) l |> fun x -> intersperse x "\n" |> String.concat "" )^ "//seq"
+    | Sequence (l, _) -> List.map (fun x -> program_to_string' x tabs) l |> fun x -> intersperse x "\n" |> String.concat "" 
     | If (cond , block1, opt_block2, dep) -> tabs_string ^ "if ("^ expr_to_string cond tabs_string ^") // "^ dependency_to_string dep ^"\n"
                                              ^ tabs_string ^ "{\n"
                                              ^ program_to_string' block1 (tabs+1) ^ "\n"
