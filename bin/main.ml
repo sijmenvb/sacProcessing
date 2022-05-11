@@ -155,6 +155,9 @@ let expr_to_string expr tabs =
   in 
   tostr expr
 
+let rec unpack_brackets expr = match expr with 
+    Brackets e  -> unpack_brackets e
+  | _ -> expr 
 
 (*TODO: try to see if the order of secuential + can go from left to right. (so (a+b)+c instead of a + (b + c) ) note: can probably only be done by parsing backwards. maybe fix this afer processing???*)
 (*TODO: add with loops *)
@@ -197,14 +200,18 @@ let variable_to_string v = match v with
 let p_variable = lift2 (fun x y -> Variable (x,y)) p_datatype (whitespace *> word <* whitespace)
 
 type dependency = 
-    Dependencies of string list * bool (*function calls , is it a recusive function*)
+    Dependencies of string list * bool * int option (*function calls , is it a recusive function, is it a dimentionality conditional and if so for which dimentionality*)
   | No_Dependency
   | Not_Loaded
   | Error
 
+let dependency_is_rec dep = match dep with
+    Dependencies (_,x,_) -> x
+  | _ -> false
 
 let dependency_to_string dependency = match dependency with 
-    Dependencies (list , recusivce ) -> (if recusivce then "recursive! " else "") ^ ("function calls: " ^ String.concat ", " list) 
+    Dependencies (list , recusivce, None ) -> (if recusivce then "recursive! " else "") ^ ("function calls: " ^ String.concat ", " list) 
+  | Dependencies (list , recusivce, Some i ) -> (if recusivce then "recursive! " else "") ^ ("function calls: " ^ String.concat ", " list) ^ " | dimentionality conditional:" ^ Int.to_string i
   | No_Dependency -> "no dependency"
   | Not_Loaded -> "dependency not loaded."
   | Error -> "ERROR COMPUTING DEPENDENCIES!"
@@ -229,7 +236,7 @@ let program_to_string p =
                                                          ^tabs_string ^  program_to_string' program (tabs+1)^ "\n" 
                                                          ^tabs_string ^ "}\n"
     | Assignment (word, expr, dep) -> tabs_string ^ word ^" = " ^expr_to_string expr tabs_string^ "; // " ^ dependency_to_string dep
-    | Sequence (l, _) -> List.map (fun x -> program_to_string' x tabs) l |> fun x -> intersperse x "\n" |> String.concat ""
+    | Sequence (l, _) -> (List.map (fun x -> program_to_string' x tabs) l |> fun x -> intersperse x "\n" |> String.concat "" )^ "//seq"
     | If (cond , block1, opt_block2, dep) -> tabs_string ^ "if ("^ expr_to_string cond tabs_string ^") // "^ dependency_to_string dep ^"\n"
                                              ^ tabs_string ^ "{\n"
                                              ^ program_to_string' block1 (tabs+1) ^ "\n"
@@ -268,9 +275,9 @@ let list_append_unique l1 l2 =
   in apend l1 l2
 
 let combine_dependencies dep1 dep2 = match (dep1,dep2) with 
-    (Dependencies (l1,_ ), Dependencies (l2,_ )) -> Dependencies ((list_append_unique l1 l2), false)
-  | (Dependencies (l1,_ ) , _) -> Dependencies (l1, false)
-  | (_, Dependencies (l2,_ )) -> Dependencies (l2, false)
+    (Dependencies (l1,_ ,_), Dependencies (l2,_ ,_)) -> Dependencies ((list_append_unique l1 l2), false, None)
+  | (Dependencies (l1,_ ,_) , _) -> Dependencies (l1, false, None)
+  | (_, Dependencies (l2,_,_)) -> Dependencies (l2, false, None)
   | (No_Dependency,_) -> No_Dependency
   | (_,No_Dependency) -> No_Dependency
   | _ -> Error
@@ -284,7 +291,7 @@ let expr_to_dependency expr =
      | Plus (e1,e2)-> combine_dependencies (expr_to_dependency' e1) (expr_to_dependency' e2)
      | Value _ -> nothing
      | Brackets e -> (expr_to_dependency' e)
-     | Function_call (name, exprList) -> combine_dependencies (Dependencies ([name],false)) (list_to_dep exprList)
+     | Function_call (name, exprList) -> combine_dependencies (Dependencies ([name],false,None)) (list_to_dep exprList)
      | Boolean (e1,_,e2) -> combine_dependencies (expr_to_dependency' e1) (expr_to_dependency' e2)
      | With_loop (typeset,gen_exprs,operations) -> combine_dependencies (combine_dependencies (expr_to_dependency' typeset) (expr_to_dependency' gen_exprs)) (expr_to_dependency' operations)
      | Array exprList -> (list_to_dep exprList)
@@ -296,9 +303,29 @@ let expr_to_dependency expr =
 
 (* takes a name and a dependency and returns a dependency if the name is in the list of function calls *)
 let is_recursive name dependency = match dependency with
-    Dependencies (list , _) -> Dependencies (list , List.exists (String.equal name) list )
+    Dependencies (list , _, _) -> Dependencies (list , List.exists (String.equal name) list, None)
   | dep -> dep
 
+(* takes a expression and a dependency and modifies the dependency based of in the expression is a dimentionality conditional. *)
+let is_dimentionality_conditional expr dep =
+  let either e1 e2 f = match f e1 e2 with
+    | Some s -> Some s
+    | None -> f e2 e1 in
+  let is_condition str = List.exists (String.equal str) ["=="; "<="] in
+  let if_dim_call expr = match unpack_brackets expr with (* check for dim(whatever) *)
+      Function_call ("dim" ,_) -> true
+    | _ -> false in
+  let get_int expr = match unpack_brackets expr with (* check for some number *)
+      Value (Num int) -> Some int
+    | _ -> None in
+  let is_dim_cond expr = match unpack_brackets expr with 
+      Boolean (e1, s, e2)-> if is_condition s then either e1 e2 (fun e1 e2 -> if if_dim_call e1 then get_int e2 else None  )  else None
+    | _ -> None in
+  match is_dim_cond expr with 
+    Some i -> (match dep with 
+        Dependencies (list, boolean, _) -> Dependencies (list, boolean, (Some i))
+      | _ -> Dependencies ([],false,Some i))
+  | None -> dep
 
 let loadDependencies program = 
   let rec loadDependencies' program = 
@@ -315,14 +342,55 @@ let loadDependencies program =
                                      in (Assignment (word, expr, new_dep),new_dep))
     | Sequence (list, _) -> (let preprocessed_list = process_list list in
                              (Sequence (tuple_first preprocessed_list, tuple_second preprocessed_list), tuple_second preprocessed_list))
-    | If (cond , block1, opt_block2, _) -> (match opt_block2 with 
-          Some block2 -> (let new_dep = combine_dependencies (combine_dependencies (tuple_second (loadDependencies' block1)) (tuple_second (loadDependencies' block2))) (expr_to_dependency cond) in
-                          (If (cond ,tuple_first (loadDependencies' block1), Some (tuple_first (loadDependencies' block2)), new_dep),new_dep))
-        | None -> (let new_dep = (tuple_second (loadDependencies' block1)) in
-                   (If (cond ,tuple_first (loadDependencies' block1), None, new_dep),new_dep)))
+    | If (cond , block1, opt_block2, _) -> 
+      (match opt_block2 with 
+         Some block2 -> (let new_dep = is_dimentionality_conditional cond (combine_dependencies (combine_dependencies (tuple_second (loadDependencies' block1)) (tuple_second (loadDependencies' block2))) (expr_to_dependency cond)) in
+                         (If (cond ,tuple_first (loadDependencies' block1), Some (tuple_first (loadDependencies' block2)), new_dep),new_dep))
+       | None -> (let new_dep = (tuple_second (loadDependencies' block1)) in
+                  (If (cond ,tuple_first (loadDependencies' block1), None, new_dep),new_dep)))
   in
   tuple_first (loadDependencies' program)
 
+let eliminate_recursion program = 
+  let is_dumb_index_set expr = match unpack_brackets expr with
+      Boolean (Dot,"<=",Boolean(Array _ ,"<",Function_call("take",_))) -> true (*TODO: test for [1], shape(arr) *)
+    | _ -> false in 
+  let is_dumb_with_loop expr rec_fun_name = match expr with 
+      With_loop (index_set, Function_call (name,_) , Function_call("modarray",_)) -> is_dumb_index_set index_set && String.equal name rec_fun_name (*TODO: check if modaray mods the same array *)
+    | _ -> false in
+  let expr_to_with_function_call expr = match expr with 
+      Function_call (name,[Value (Var arr)]) -> Some ((Function_call (name, [ExprWithIndex (Value (Var arr), [Value (Var "iv")])] )),arr)
+    | _ -> None in
+  let generate_with_loop expr = match expr with
+      Some (expr,arr) -> Some (With_loop (Boolean (Dot,"<=",Boolean(Value (Var "iv") ,"<",Function_call("shape",[Value (Var arr)]))), expr, Function_call ("modarray",[Value (Var arr)])))
+    | None -> None in
+  let replace_if_statement program return_value rec_fun_name = match program with 
+      If (cond , Sequence ([Assignment (name, expr,dep)],dep2), Some Sequence ([Assignment (name2, expr2,dep3)],dep4), Dependencies (list,b,int)) -> 
+      (let do_nothing = If (cond , Sequence ([Assignment (name, expr,dep)],dep2), Some (Sequence ([Assignment (name2, expr2,dep3)],dep4)), Dependencies (list,b,int)) 
+       in  
+       if (String.equal name name2 && String.equal name return_value && is_dumb_with_loop expr2 rec_fun_name)
+       then (match generate_with_loop (expr_to_with_function_call expr) with 
+             Some with_loop -> Assignment (name ,with_loop,Dependencies (list,b,int)) 
+           | _  -> do_nothing)
+       else do_nothing)
+    | x -> x  in
+  let get_return program = match program with 
+      Return (Value (Var x), _ ) -> x
+    | _ -> "" in
+  let replace_function_sequence program rec_fun_name= match program with 
+      Sequence (list, dep) -> (match list with 
+          if_statement :: return_statement :: [] -> Sequence ([replace_if_statement if_statement (get_return return_statement) rec_fun_name ;return_statement], dep)
+        | _ -> Sequence ([], dep))
+    | x -> x 
+  in
+  let rec eliminate_recursion' program = match program with
+      Sequence (list, dep) -> Sequence( List.map eliminate_recursion' list, dep)
+    | Function (datatype, name, inputs, program, dep) -> if dependency_is_rec dep then 
+        Function (datatype, name, inputs, replace_function_sequence program name, dep) 
+      else Function (datatype, name, inputs, program, dep)
+    | x -> x
+  in
+  eliminate_recursion' program
 
 
 let convert parser str  =
@@ -333,5 +401,6 @@ let convert parser str  =
 
 convert p_program input
 |> loadDependencies
+|> eliminate_recursion
 |> program_to_string
 |> write_whole_file;;
