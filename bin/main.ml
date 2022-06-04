@@ -57,13 +57,14 @@ let tuple_first t = match t with
 let tuple_second t = match t with
     (_,b) -> b
 
+(** puts an item in between all of the items in a list. usefull for e.g. adding commas to a list *)
 let rec intersperse l item = match l with 
     x1::x2::xs -> x1 :: item :: intersperse  (x2 :: xs) item
   | x1 :: [] -> [x1]
   | [] -> []
 
 
-
+(** repeats a sting i times. usefull for tepeatign tabs ( \t or "   " ) for indentation *)
 let replicate str i =
   let rec replicate' str i = if i > 0 
     then
@@ -79,17 +80,20 @@ let is_whitespace = function
   | _ -> false
 
 
-
+(** used to remove spaces and enters (SaC ignores whitespace) *)
 let whitespace = take_while is_whitespace
 
 let is_letter c = Char.lowercase_ascii c
                   |> Char.code
                   |> fun c -> not (c < Char.code 'a'|| c > Char.code 'z')
 
+(** parsing a word definded as many letters a-z untill it hit's a non letter *)
 let word = take_while1 (is_letter)
 
+(** applies the parser at least once and repeats for all following comma's returning a list. *)
 let p_comma_separated_list parser = lift2 (fun x y -> List.append x [y]) (many (parser <* whitespace <* char ',' <* whitespace)) ( parser)
 
+(** takes a list  and makes it a comma seperated list. tostr is the finction used to convert to strings. *)
 let comma_separated_list_to_string tostr l = if (l == []) 
   then "" 
   else l 
@@ -97,6 +101,7 @@ let comma_separated_list_to_string tostr l = if (l == [])
        |> (fun x -> intersperse x ",")
        |> String.concat ""
 
+(** the base values that can be used to "store" data e.g. constant's and variables. also the star ( * ) for defining arrays with arbitrary shape. *)
 type value = Star
            | Num of int
            | Var of string
@@ -110,6 +115,7 @@ let p_value =
   let var = lift (fun x -> Var x) word  in
   int <|>  star <|> var
 
+
 let value_to_string v = match v with 
     Star -> "*"
   | Num x -> Int.to_string x
@@ -117,6 +123,7 @@ let value_to_string v = match v with
 
 let values_list_to_string l = if List.length l != 0 then "["^comma_separated_list_to_string value_to_string l ^"]" else ""
 
+(** the type of data currently only int since the type is not important for this project. *)
 type datatype = Int of value list
 
 let datatype_to_string d = match d with
@@ -124,11 +131,12 @@ let datatype_to_string d = match d with
 
 let p_value_list = p_comma_separated_list p_value 
 
+(** parse the datatype (currently int only) *)
 let p_datatype = lift (fun x -> Int x) (string "int" *> char '[' *> p_value_list <* char ']')<|>
                  string "int" *> return (Int [])
 
 
-
+(** used to store expression such as adding, acsessign a variable, boolena logic ,functions calls and With-Loops *)
 type expr = Plus of expr * expr
           | Boolean of expr * string * expr
           | Value of value
@@ -140,6 +148,7 @@ type expr = Plus of expr * expr
           | Dot
           | MDot
 
+(** make expression into valid* code to be inserted. ( * the code on it's own just when used as expression) *)
 let expr_to_string expr tabs = 
   let rec tostr expr = match expr with 
     | Plus (e1,e2)-> "("^tostr e1 ^" + "^ tostr e2^")"
@@ -155,12 +164,12 @@ let expr_to_string expr tabs =
   in 
   tostr expr
 
+(** sdfsf *)  
 let rec unpack_brackets expr = match expr with 
     Brackets e  -> unpack_brackets e
   | _ -> expr 
 
-(*TODO: try to see if the order of secuential + can go from left to right. (so (a+b)+c instead of a + (b + c) ) note: can probably only be done by parsing backwards. maybe fix this afer processing???*)
-(*TODO: add with loops *)
+(* we maybe should try to see if the order of secuential + can go from left to right. (so (a+b)+c instead of a + (b + c) ) note: can probably only be done by parsing backwards. maybe fix this afer processing???, it does not impact seeing when to convert to a with loop.*)
 let p_expr = 
   let boolean_seperator = string "==" <|> string "<=" <|>string ">=" <|>string "<" <|> string ">" <|> string "&&" <|> string "==" in
   fix (fun expr ->
@@ -192,6 +201,7 @@ let p_expr =
       boolean <|> plus <|> exprWithIndex <|> single
     )
 
+(** variables store variable declarations. *)
 type variable = Variable of datatype * string
 
 let variable_to_string v = match v with 
@@ -199,12 +209,14 @@ let variable_to_string v = match v with
 
 let p_variable = lift2 (fun x y -> Variable (x,y)) p_datatype (whitespace *> word <* whitespace)
 
+(** dependency's are used to store some information about the code to easily separate things like detecting recursion. or what a function depends on. *)
 type dependency = 
     Dependencies of string list * bool * int option (*function calls , is it a recusive function, is it a dimentionality conditional and if so for which dimentionality*)
   | No_Dependency
   | Not_Loaded
   | Error
 
+(** returns true if dependency (of function) is recusive *)
 let dependency_is_rec dep = match dep with
     Dependencies (_,x,_) -> x
   | _ -> false
@@ -216,6 +228,8 @@ let dependency_to_string dependency = match dependency with
   | Not_Loaded -> "dependency not loaded."
   | Error -> "ERROR COMPUTING DEPENDENCIES!"
 
+
+(** datastructure that holds all the high level operations (assingment funtions if statement etc.) *)
 type program = Import of string * string * dependency
              | Var of variable * dependency
              | Return of expr * dependency
@@ -224,6 +238,7 @@ type program = Import of string * string * dependency
              | If of expr * program * program option * dependency
              | Sequence of program list * dependency
 
+(** convert the program back to (valid) code *)
 let program_to_string p = 
   let rec program_to_string' p tabs = 
     let tabs_string = replicate "   " tabs in
@@ -251,6 +266,7 @@ let program_to_string p =
 
   program_to_string' p 0
 
+(** parse the program from the code (as string) *)
 let p_program = fix (fun program ->
     let p_return = lift (fun x -> Return (x,Not_Loaded)) (string "return" *> whitespace *> p_expr <* whitespace <* char ';') in
     let p_var = lift (fun x -> Var (x,Not_Loaded)) p_variable <* char ';' in
@@ -267,6 +283,7 @@ let p_program = fix (fun program ->
     lift (fun x -> Sequence (x,Not_Loaded)) (many1 (parse <* whitespace))
   )
 
+(** appends a string to the list only if it it is not yet in the list*)
 let list_append_unique l1 l2 =
   let exist l1 s = List.exists (fun x -> String.equal x s) l1 in
   let rec apend l1 l2 = match l2 with 
@@ -274,6 +291,7 @@ let list_append_unique l1 l2 =
     | [] -> l1
   in apend l1 l2
 
+(** specifies how dependencies are combined e.g. an ifstatement has the dependencies from the if and the else combined. *)
 let combine_dependencies dep1 dep2 = match (dep1,dep2) with 
     (Dependencies (l1,_ ,_), Dependencies (l2,_ ,_)) -> Dependencies ((list_append_unique l1 l2), false, None)
   | (Dependencies (l1,_ ,_) , _) -> Dependencies (l1, false, None)
@@ -282,6 +300,7 @@ let combine_dependencies dep1 dep2 = match (dep1,dep2) with
   | (_,No_Dependency) -> No_Dependency
   | _ -> Error
 
+(** adds the function calls to the dependencies *)
 let expr_to_dependency expr =
   let nothing = No_Dependency in
 
@@ -301,12 +320,12 @@ let expr_to_dependency expr =
   in
   expr_to_dependency' expr
 
-(* takes a name and a dependency and returns a dependency if the name is in the list of function calls *)
+(** takes a name and a dependency and returns a dependency if the name is in the list of function calls *)
 let is_recursive name dependency = match dependency with
     Dependencies (list , _, _) -> Dependencies (list , List.exists (String.equal name) list, None)
   | dep -> dep
 
-(* takes a expression and a dependency and modifies the dependency based of in the expression is a dimentionality conditional. *)
+(** takes a expression and a dependency and modifies the dependency based of in the expression is a dimentionality conditional. *)
 let is_dimentionality_conditional expr dep =
   let either e1 e2 f = match f e1 e2 with
     | Some s -> Some s
@@ -327,6 +346,7 @@ let is_dimentionality_conditional expr dep =
       | _ -> Dependencies ([],false,Some i))
   | None -> dep
 
+(** takes the program and computes the dependencies.*)
 let loadDependencies program = 
   let rec loadDependencies' program = 
     let process_list l = let new_list = List.map loadDependencies' l in (List.map tuple_first new_list ,List.fold_left combine_dependencies Not_Loaded (List.map tuple_second new_list)) in
@@ -352,24 +372,25 @@ let loadDependencies program =
   tuple_first (loadDependencies' program)
 
 let eliminate_recursion program = 
-  let is_dumb_index_set expr = match unpack_brackets expr with
-      Boolean (Dot,"<=",Boolean(Array _ ,"<",Function_call("take",_))) -> true (*TODO: test for [1], shape(arr) *)
+  let is_dumb_index_set expr arrayName = match unpack_brackets expr with
+      Boolean (Dot,"<=",Boolean(Array [Value (Var _)] ,"<",Function_call("take",[Array [Value (Num 1)];Function_call ("shape",[Value (Var arrName)]) ]))) -> String.equal arrayName arrName
     | _ -> false in 
-  let is_dumb_with_loop expr rec_fun_name = match expr with 
-      With_loop (index_set, Function_call (name,_) , Function_call("modarray",_)) -> is_dumb_index_set index_set && String.equal name rec_fun_name (*TODO: check if modaray mods the same array *)
+  let is_dumb_with_loop expr rec_fun_name arrayName = match expr with 
+      With_loop (index_set, Function_call (name,_) , Function_call("modarray",[Value (Var arrBeingModdified)])) -> is_dumb_index_set index_set arrayName && String.equal name rec_fun_name && String.equal arrayName arrBeingModdified
     | _ -> false in
   let expr_to_with_function_call expr = match expr with 
       Function_call (name,[Value (Var arr)]) -> Some ((Function_call (name, [ExprWithIndex (Value (Var arr), [Value (Var "iv")])] )),arr)
     | _ -> None in
-  let generate_with_loop expr = match expr with
-      Some (expr,arr) -> Some (With_loop (Boolean (Dot,"<=",Boolean(Value (Var "iv") ,"<",Function_call("shape",[Value (Var arr)]))), expr, Function_call ("modarray",[Value (Var arr)])))
-    | None -> None in
-  let replace_if_statement program return_value rec_fun_name = match program with 
+  let generate_with_loop expr base_case_dimentionality= match (expr,base_case_dimentionality) with
+      (Some (expr,arr),Some 0) -> Some (With_loop (Boolean (Dot,"<=",Boolean(Value (Var "iv") ,"<",Function_call("shape",[Value (Var arr)]))), expr, Function_call ("modarray",[Value (Var arr)])))
+    | (Some (expr,arr),Some dim) -> Some (With_loop (Boolean (Dot,"<=",Boolean(Value (Var "iv") ,"<",Function_call("drop",[Array [Value (Num (-1*dim))];Function_call("shape",[Value (Var arr)])]))), expr, Function_call ("genarray",[Array [Value (Num (-1*dim))];Function_call("shape",[Value (Var arr)]);Value (Num 0)]))) (*base case is not zero. *)
+    | _ -> None in
+  let replace_if_statement program return_value rec_fun_name arrayName = match program with 
       If (cond , Sequence ([Assignment (name, expr,dep)],dep2), Some Sequence ([Assignment (name2, expr2,dep3)],dep4), Dependencies (list,b,int)) -> 
       (let do_nothing = If (cond , Sequence ([Assignment (name, expr,dep)],dep2), Some (Sequence ([Assignment (name2, expr2,dep3)],dep4)), Dependencies (list,b,int)) 
        in  
-       if (String.equal name name2 && String.equal name return_value && is_dumb_with_loop expr2 rec_fun_name)
-       then (match generate_with_loop (expr_to_with_function_call expr) with 
+       if (String.equal name name2 && String.equal name return_value && is_dumb_with_loop expr2 rec_fun_name arrayName)
+       then (match generate_with_loop (expr_to_with_function_call expr) int with 
              Some with_loop -> Assignment (name ,with_loop,Dependencies (list,b,int)) 
            | _  -> do_nothing)
        else do_nothing)
@@ -377,17 +398,17 @@ let eliminate_recursion program =
   let get_return program = match program with 
       Return (Value (Var x), _ ) -> x
     | _ -> "" in
-  let replace_function_sequence program rec_fun_name= match program with 
+  let replace_function_sequence program rec_fun_name arrayName = match program with 
       Sequence (list, dep) -> (match list with 
-          if_statement :: return_statement :: [] -> Sequence ([replace_if_statement if_statement (get_return return_statement) rec_fun_name ;return_statement], dep)
+          if_statement :: return_statement :: [] -> Sequence ([replace_if_statement if_statement (get_return return_statement) rec_fun_name arrayName;return_statement], dep)
         | _ -> Sequence ([], dep))
     | x -> x 
   in
   let rec eliminate_recursion' program = match program with
       Sequence (list, dep) -> Sequence( List.map eliminate_recursion' list, dep)
-    | Function (datatype, name, inputs, program, dep) -> if dependency_is_rec dep then 
-        Function (datatype, name, inputs, replace_function_sequence program name, dep) 
-      else Function (datatype, name, inputs, program, dep)
+    | Function (datatype, name, inputs, program, dep) -> (match (inputs, dependency_is_rec dep) with 
+          ([Variable (_,arrayName)],true) -> Function (datatype, name, inputs, replace_function_sequence program name arrayName, dep) 
+        | _ -> Function (datatype, name, inputs, program, dep))
     | x -> x
   in
   eliminate_recursion' program
