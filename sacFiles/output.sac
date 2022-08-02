@@ -1,65 +1,24 @@
-/*import:*/
-use StdIO : all;/*import:*/
-use Array : all;/*unprocessed:int func*/int func(/*unprocessed:int x)*/int x){
-/*unprocessed:return x + 3;*/return x + 3;/*unprocessed:}
+use StdIO : all; // no dependency
+use Array : all; // no dependency
+int func(int x) // no dependency
+{
+   return (x + 3); // no dependency
+}
 
-int[*] recFunc*/}
+int[*] recFunc(int[*] arr) // recursive! function calls: dim, take, shape, recFunc, modarray, func
+{
+   res = with
+   {
+      (. <= (iv < shape(arr))) : func(arr[iv]);
+   }:modarray(arr); // function calls: dim, take, shape, recFunc, modarray, func | dimentionality conditional:0
+   return res; // no dependency
+}
 
-int[*] recFunc(/*unprocessed:int[*] arr)*/int[*] arr)   {
-/*unprocessed:if*/if(/*unprocessed:dim*/dim(/*unprocessed:arr) == 0)*/arr) == 0)      {
-/*unprocessed:res = func*/res = func(/*unprocessed:arr);*/arr);/*unprocessed:}
-   else*/}
-   else         {
-/*unprocessed:res = with*/res = with            {
-/*unprocessed:*/(/*unprocessed:.<= [i] < take*/.<= [i] < take(/*unprocessed:[1], shape*/[1], shape(/*unprocessed:arr))) : recFunc*/arr))) : recFunc(/*unprocessed:arr[i]);*/arr[i]);/*unprocessed:}:modarray*/}:modarray(/*unprocessed:arr);*/arr);/*unprocessed:}
-   return res;*/}
-   return res;/*unprocessed:}*/})/*unprocessed:*/)/*unprocessed:*/)/*unprocessed:*/)/*unprocessed:*/)/*unprocessed:*/            }/*unprocessed:*/         }/*unprocessed:*/)/*unprocessed:*/      }/*unprocessed:*/)/*unprocessed:*/)/*unprocessed:*/   }/*unprocessed:*/)/*unprocessed:*/}/*unprocessed:*/)/*Whitespace*/
-
-
-/*import:
-import:
-unprocessed:int func
-(unprocessed:int x)
-Brackets:{
-unprocessed:return x + 3;
-unprocessed:}
-
-int[*] recFunc
-   (unprocessed:int[*] arr)
-   Brackets:{
-   unprocessed:if
-      (unprocessed:dim
-      (unprocessed:arr) == 0)
-      Brackets:{
-      unprocessed:res = func
-         (unprocessed:arr);
-unprocessed:}
-   else
-         Brackets:{
-         unprocessed:res = with
-            Brackets:{
-            unprocessed:
-               (unprocessed:.<= [i] < take
-               (unprocessed:[1], shape
-               (unprocessed:arr))) : recFunc
-               (unprocessed:arr[i]);
-unprocessed:}:modarray
-               (unprocessed:arr);
-unprocessed:}
-   return res;
-unprocessed:})
-unprocessed:)
-unprocessed:)
-unprocessed:)
-unprocessed:)
-unprocessed:            }
-unprocessed:         }
-unprocessed:)
-unprocessed:      }
-unprocessed:)
-unprocessed:)
-unprocessed:   }
-unprocessed:)
-unprocessed:}
-unprocessed:)
-Whitespace*/
+int[*] sumArr(int[*] arr) // recursive! function calls: dim, take, shape, sumArr, modarray, sum
+{
+   res = with
+   {
+      (. <= (iv < drop([-1],shape(arr)))) : sum(arr[iv]);
+   }:genarray([-1],shape(arr),0); // function calls: dim, take, shape, sumArr, modarray, sum | dimentionality conditional:1
+   return res; // no dependency
+}

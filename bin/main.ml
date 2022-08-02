@@ -146,9 +146,9 @@ type expr = Plus of expr * expr
           | Array of expr list
           | ExprWithIndex of expr * expr list (* things of type arr[1,3] *)
           | Dot
-          | MDot
+          | MDot (* not used *)
 
-(** make expression into valid* code to be inserted. ( * the code on it's own just when used as expression) *)
+(** make expression into valid*ode to be inserted. ( * the code on it's own just when used as expression) *)
 let expr_to_string expr tabs = 
   let rec tostr expr = match expr with 
     | Plus (e1,e2)-> "("^tostr e1 ^" + "^ tostr e2^")"
@@ -171,7 +171,7 @@ let rec unpack_brackets expr = match expr with
 
 (* we maybe should try to see if the order of secuential + can go from left to right. (so (a+b)+c instead of a + (b + c) ) note: can probably only be done by parsing backwards. maybe fix this afer processing???, it does not impact seeing when to convert to a with loop.*)
 let p_expr = 
-  let boolean_seperator = string "==" <|> string "<=" <|>string ">=" <|>string "<" <|> string ">" <|> string "&&" <|> string "==" in
+  let boolean_seperator = string "==" <|> string "<=" <|>string ">=" <|>string "<" <|> string ">" <|> string "&&" <|> string "||" in
   fix (fun expr ->
       let value = lift (fun x -> Value x) p_value 
       in

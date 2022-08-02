@@ -21,3 +21,19 @@ int[*] recFunc(int[*] arr)
    }
    return res;
 }
+
+int[*] sumArr(int[*] arr)
+{
+   if (dim(arr) == 1)
+   {
+      res = sum(arr);
+   }
+   else
+   {
+      res = with
+      {
+         (.<= [i] < take([1], shape(arr)))) : sumArr(arr[i]);
+      }:modarray(arr);
+   }
+   return res;
+}
