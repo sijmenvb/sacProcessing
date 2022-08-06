@@ -6,6 +6,6 @@ this was used to formalise and validate a model as a template for implementing t
 this is **NOT** production software. 
 
 
-main/bin/main.ml is the only relevant file in this repository, the rest is for the development environment.
+/bin/main.ml is the only relevant file in this repository, the rest is for the development environment.
 
 (this is my first ocaml project, don't expect neat code.)
